@@ -104,10 +104,35 @@ class SouShuBaClient:
         }
 
         resp = self.session.post(login_url, proxies=self.proxies, data=payload, headers=headers, verify=False)
-        if resp.status_code == 200:
-            logger.info(f'Welcome {self.username}!')
+        resp.raise_for_status()
+        home = self.session.get(f'https://{self.hostname}/home.php', verify=False, timeout=30)
+        home.raise_for_status()
+        soup = BeautifulSoup(home.content, 'html.parser')
+        authenticated = any('action=logout' in a.get('href', '') for a in soup.find_all('a'))
+        if not authenticated:
+            raise ValueError('Login was not confirmed: ' + self.response_message(resp))
+        logger.info('Forum login confirmed by authenticated logout link.')
+
+    def response_message(self, resp):
+        """Report the forum message without dumping HTML or credentials."""
+        soup = BeautifulSoup(resp.content, 'html.parser')
+        encoding = soup.original_encoding or resp.encoding or 'utf-8'
+        body = resp.content.decode(encoding, errors='replace')
+        match = re.search(r"(?:errorhandle_\w+|showDialog)\s*\(\s*(['\"])(.*?)\1", body, re.S)
+        if match:
+            message = BeautifulSoup(match.group(2), 'html.parser').get_text(' ', strip=True)
         else:
-            raise ValueError('Verify Failed! Check your username and password!')
+            inner = re.search(r'<!\[CDATA\[(.*?)\]\]>', body, re.S)
+            if inner:
+                soup = BeautifulSoup(inner.group(1), 'html.parser')
+            for tag in soup(['script', 'style', 'input']):
+                tag.decompose()
+            message = soup.get_text(' ', strip=True)
+        for value in (self.password, self.username, self.answer):
+            if value:
+                message = message.replace(value, '[redacted]')
+        message = re.sub(r'https?://\S+|[A-Za-z0-9_-]{24,}', '[redacted]', message)
+        return message[:300] or 'No readable forum message; login may require verification.'
 
     def credit(self):
         credit_url = f"https://{self.hostname}/home.php?mod=spacecp&ac=credit&showcredit=1&inajax=1&ajaxtarget=extcreditmenu_menu"
@@ -119,7 +144,10 @@ class SouShuBaClient:
 
         # 使用 BeautifulSoup 解析 CDATA 内容
         cdata_soup = BeautifulSoup(cdata_content, features="lxml")
-        hcredit_2 = cdata_soup.find("span", id="hcredit_2").string
+        credit_element = cdata_soup.find("span", id="hcredit_2")
+        if credit_element is None:
+            raise ValueError('The forum did not return the expected account credit field.')
+        hcredit_2 = credit_element.get_text(strip=True)
 
         return hcredit_2
 
@@ -147,9 +175,10 @@ class SouShuBaClient:
             resp = self.session.post(space_url, proxies=self.proxies, data=payload, headers=headers, verify=False)
             if re.search("操作成功", resp.text):
                 logger.info(f'{self.username} post {x + 1}nd successfully!')
-                time.sleep(120)
+                if x < 4:
+                    time.sleep(120)
             else:
-                logger.warning(f'{self.username} post {x + 1}nd failed!')
+                raise ValueError(f'Post {x + 1} failed; stopping to avoid repeated submissions: ' + self.response_message(resp))
 
 
 if __name__ == '__main__':
@@ -163,6 +192,9 @@ if __name__ == '__main__':
                                 os.environ.get('SOUSHUBA_USERNAME', "USERNAME"),
                                 os.environ.get('SOUSHUBA_PASSWORD', "PASSWORD"))
         client.login()
+        if '--check-login' in sys.argv:
+            logger.info('Login check completed; no dynamics were submitted.')
+            sys.exit(0)
         client.space()
         credit = client.credit()
         logger.info(f'{client.username} have {credit} coins!')
