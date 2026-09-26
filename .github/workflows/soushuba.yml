@@ -1,6 +1,11 @@
 name: Run soushuba qiandao
 on:
   workflow_dispatch:
+    inputs:
+      login_only:
+        description: 'Verify login without publishing dynamics'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 21 * * *'
 permissions:
@@ -36,4 +41,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run qiandao
-        run: python -u soushuba.py
+        env:
+          LOGIN_ONLY: ${{ inputs.login_only }}
+        run: |
+          if [ "$LOGIN_ONLY" = "true" ]; then
+            python -u soushuba.py --check-login
+          else
+            python -u soushuba.py
+          fi
