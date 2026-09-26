@@ -1,26 +1,39 @@
 name: Run soushuba qiandao
 on:
-  push:
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
   schedule:
     - cron: '0 21 * * *'
-
+permissions:
+  contents: read
+concurrency:
+  group: soushuba-qiandao
+  cancel-in-progress: false
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       SOUSHUBA_HOSTNAME: ${{ secrets.SOUSHUBA_HOSTNAME }}
       SOUSHUBA_USERNAME: ${{ secrets.SOUSHUBA_USERNAME }}
       SOUSHUBA_PASSWORD: ${{ secrets.SOUSHUBA_PASSWORD }}
-
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v3
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
-          cache: 'pip'
-      - run: pip install -r requirements.txt
-      - run: python soushuba.py
+          cache: pip
+      - name: Check configuration
+        shell: bash
+        run: |
+          for key in SOUSHUBA_HOSTNAME SOUSHUBA_USERNAME SOUSHUBA_PASSWORD; do
+            if [ -z "${!key}" ]; then
+              echo "::error::Missing secret: $key"
+              exit 1
+            fi
+          done
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run qiandao
+        run: python -u soushuba.py
