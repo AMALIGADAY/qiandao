@@ -1,4 +1,5 @@
 import os
+import logging
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -18,6 +19,26 @@ def response(body='', status=200, encoding='utf-8'):
 
 
 class ResilienceTests(unittest.TestCase):
+    def setUp(self):
+        self.previous_log_level = logging.root.manager.disable
+        logging.disable(logging.CRITICAL)
+
+    def tearDown(self):
+        logging.disable(self.previous_log_level)
+
+    @patch('soushuba.requests.get')
+    def test_upstream_403_refresh_document(self, get):
+        get.return_value = response('<meta http-equiv="refresh" content="0; url=https://example.test/next">', 403)
+        self.assertEqual(app.get_refresh_url('https://example.test/start'), 'https://example.test/next')
+        get.assert_called_once()
+
+    @patch('soushuba.requests.get')
+    def test_403_without_redirect_stops(self, get):
+        get.return_value = response('<h1>Access denied</h1>', 403)
+        with self.assertRaisesRegex(net.TaskError, 'HTTP 403'):
+            app.get_refresh_url('https://example.test/start')
+        get.assert_called_once()
+
     @patch('resilience.time.sleep')
     def test_http_503_read_recovers(self, sleep):
         session = Mock()

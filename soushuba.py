@@ -36,9 +36,11 @@ def get_refresh_url(url: str):
             if str(tag.get('http-equiv', '')).lower() == 'refresh':
                 match = re.search(r'url\s*=\s*(.+)', tag.get('content', ''), re.I)
                 if match:
-                    return urljoin(response.url, match.group(1).strip().strip('\"\x27'))
+                    target = urljoin(response.url, match.group(1).strip().strip('\"\x27'))
+                    if urlparse(target).scheme in ('http', 'https') and urlparse(target).hostname:
+                        return target
         raise TaskError('解析入口跳转', '页面缺少 meta refresh 跳转字段')
-    return read_page(requests, url, '读取入口跳转页', parse)
+    return read_page(requests, url, '读取入口跳转页', parse, allow_redirect_document=True)
 
 def get_url(url: str):
     def parse(response):

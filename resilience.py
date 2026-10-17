@@ -35,12 +35,19 @@ def database_error(response):
     return 'discuz! database error' in text(response).lower()
 
 
-def read_page(session, url, stage, parser=None, **kwargs):
+def read_page(session, url, stage, parser=None, allow_redirect_document=False, **kwargs):
     if not url or urlparse(url).scheme not in ('http', 'https') or not urlparse(url).hostname:
         raise TaskError(stage, '入口未返回有效的 HTTP(S) 地址')
     for attempt in range(3):
         try:
             response = session.get(url, timeout=TIMEOUT, **kwargs)
+            if response.status_code == 403 and allow_redirect_document and parser:
+                # Upstream entry pages sometimes serve public meta-refresh links
+                # with 403. Parse that link only; do not retry or bypass a denial.
+                try:
+                    return parser(response)
+                except TaskError:
+                    raise requests.HTTPError(response=response) from None
             if response.status_code in TRANSIENT_STATUS:
                 raise TaskError(stage, f'服务器暂时不可用（HTTP {response.status_code}）')
             if response.status_code >= 400:
