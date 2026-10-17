@@ -16,7 +16,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       SOUSHUBA_HOSTNAME: ${{ secrets.SOUSHUBA_HOSTNAME }}
       SOUSHUBA_USERNAME: ${{ secrets.SOUSHUBA_USERNAME }}
@@ -40,6 +40,8 @@ jobs:
           done
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Test failure handling
+        run: python -m unittest discover -s tests -v
       - name: Run qiandao
         env:
           LOGIN_ONLY: ${{ inputs.login_only }}
