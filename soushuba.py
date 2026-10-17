@@ -11,6 +11,18 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 from resilience import TaskError, read_page, send_once, text, write_summary
+
+# Exact host previously verified by successful runs in this repository.
+# A new forum host requires review before credentials may be sent there.
+TRUSTED_FORUM_HOSTS = frozenset({'sp6m.fwsefwef66s.com'})
+
+
+def validate_forum_url(url):
+    parsed = urlparse(url)
+    if (parsed.scheme != 'https' or parsed.hostname not in TRUSTED_FORUM_HOSTS
+            or parsed.username or parsed.password or parsed.port not in (None, 443)):
+        raise TaskError('核对论坛地址', '入口返回的地址不在已验证论坛域名中；停止发送账号密码，需核对新域名')
+    return url
 import time
 import logging
 import urllib3
@@ -40,7 +52,7 @@ def get_refresh_url(url: str):
                     if urlparse(target).scheme in ('http', 'https') and urlparse(target).hostname:
                         return target
         raise TaskError('解析入口跳转', '页面缺少 meta refresh 跳转字段')
-    return read_page(requests, url, '读取入口跳转页', parse, allow_redirect_document=True)
+    return read_page(requests, url, '读取入口跳转页', parse, document_statuses=(403,))
 
 def get_url(url: str):
     def parse(response):
@@ -49,9 +61,9 @@ def get_url(url: str):
             if link.get_text(strip=True) == '搜书吧':
                 target = urljoin(response.url, link['href'])
                 if urlparse(target).scheme in ('http', 'https') and urlparse(target).hostname:
-                    return target
+                    return validate_forum_url(target)
         raise TaskError('解析论坛地址', '入口页面缺少有效的搜书吧链接')
-    return read_page(requests, url, '读取论坛地址页', parse)
+    return read_page(requests, url, '读取论坛地址页', parse, document_statuses=(404,))
 
 
 def form_fields(response, login=False):
@@ -71,6 +83,7 @@ class SouShuBaClient:
 
     def __init__(self, hostname: str, username: str, password: str, questionid: str = '0', answer: str = None,
                  proxies: dict | None = None):
+        validate_forum_url(f'https://{hostname}')
         self.session: requests.Session = requests.Session()
         self.hostname = hostname
         self.username = username

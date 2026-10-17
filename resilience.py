@@ -35,15 +35,16 @@ def database_error(response):
     return 'discuz! database error' in text(response).lower()
 
 
-def read_page(session, url, stage, parser=None, allow_redirect_document=False, **kwargs):
+def read_page(session, url, stage, parser=None, document_statuses=(), **kwargs):
     if not url or urlparse(url).scheme not in ('http', 'https') or not urlparse(url).hostname:
         raise TaskError(stage, '入口未返回有效的 HTTP(S) 地址')
     for attempt in range(3):
         try:
             response = session.get(url, timeout=TIMEOUT, **kwargs)
-            if response.status_code == 403 and allow_redirect_document and parser:
+            if response.status_code in document_statuses and parser:
                 # Upstream entry pages sometimes serve public meta-refresh links
-                # with 403. Parse that link only; do not retry or bypass a denial.
+                # with an error status. Only an explicitly expected, valid link
+                # is accepted; no challenge solving or denial retry is performed.
                 try:
                     return parser(response)
                 except TaskError:
@@ -73,11 +74,14 @@ def read_page(session, url, stage, parser=None, allow_redirect_document=False, *
 
 def send_once(session, url, stage, **kwargs):
     try:
-        response = session.post(url, timeout=TIMEOUT, **kwargs)
+        # Never follow a credential-bearing POST to another host.
+        response = session.post(url, timeout=TIMEOUT, allow_redirects=False, **kwargs)
     except requests.RequestException as exc:
         raise TaskError(stage, f'提交网络异常（{type(exc).__name__}），结果不确定，不自动重试', True) from None
     if database_error(response):
         raise TaskError(stage, '论坛数据库异常，未确认提交成功，不自动重试', True)
+    if 300 <= response.status_code < 400:
+        raise TaskError(stage, '提交返回重定向，未跟随跳转；结果待核实', True)
     if response.status_code >= 400:
         raise TaskError(stage, f'提交返回 HTTP {response.status_code}，未确认成功，不自动重试', True)
     return response

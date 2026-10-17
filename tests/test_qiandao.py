@@ -19,12 +19,46 @@ def response(body='', status=200, encoding='utf-8'):
 
 
 class ResilienceTests(unittest.TestCase):
+    @patch('soushuba.requests.get')
+    def test_404_with_valid_public_forum_link(self, get):
+        get.return_value = response('<a href="https://example.test/forum">搜书吧</a>', 404)
+        self.assertEqual(app.get_url('https://example.test/start'), 'https://example.test/forum')
+
+    @patch('soushuba.requests.get')
+    def test_real_404_stops(self, get):
+        get.return_value = response('<h1>Not Found</h1>', 404)
+        with self.assertRaisesRegex(net.TaskError, 'HTTP 404'):
+            app.get_url('https://example.test/start')
+        get.assert_called_once()
+
     def setUp(self):
         self.previous_log_level = logging.root.manager.disable
         logging.disable(logging.CRITICAL)
+        hosts = patch('soushuba.TRUSTED_FORUM_HOSTS', app.TRUSTED_FORUM_HOSTS | {'example.test'})
+        hosts.start()
+        self.addCleanup(hosts.stop)
 
     def tearDown(self):
         logging.disable(self.previous_log_level)
+
+    def test_untrusted_forum_cannot_construct_client(self):
+        with self.assertRaisesRegex(net.TaskError, '不在已验证论坛域名'):
+            app.SouShuBaClient('attacker.test', 'user', 'password')
+
+    @patch('soushuba.requests.get')
+    def test_404_link_cannot_authorize_a_new_host(self, get):
+        get.return_value = response('<a href="https://attacker.test">搜书吧</a>', 404)
+        with self.assertRaises(net.TaskError):
+            app.get_url('https://example.test/start')
+        get.assert_called_once()
+
+    def test_post_redirect_is_not_followed(self):
+        session = Mock()
+        session.post.return_value = response('', 307)
+        with self.assertRaises(net.TaskError):
+            net.send_once(session, 'https://example.test', 'login')
+        self.assertFalse(session.post.call_args.kwargs['allow_redirects'])
+        session.post.assert_called_once()
 
     @patch('soushuba.requests.get')
     def test_upstream_403_refresh_document(self, get):
